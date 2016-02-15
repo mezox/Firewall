@@ -1,0 +1,146 @@
+#!/usr/bin/python
+
+import re
+import os
+import argparse
+import sys
+
+rule_regex = re.compile(
+    '^(\d+)\s+(allow|deny)\s+(tcp|udp|icmp|ip)\s+from\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|any)\s+to\s+(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|any)(?:\s{1,}src-port\s+(\d+))?(?:\s{1,}dst-port\s+(\d+))?$')
+
+matched_rules = []
+invalid_rules = []
+
+PROCFS_PATH = '/proc/pdsfw'
+MAX_SIZE = 2048
+
+def PrintRules():
+    "Prints rules in linux kernel"
+    if os.path.isfile(PROCFS_PATH) and os.access(PROCFS_PATH,os.R_OK):
+        print 'id\taction\tsrcip\t\tsrcport\tdstip\t\tdstport\tprotocol'
+
+        with open(PROCFS_PATH,'r') as myfile:
+            for line in myfile:
+                print line,
+    else:
+        print 'PDSFW procfs file does not exist or is not readable'
+        sys.exit(1)
+
+    return
+
+def AddRule(rule):
+    "Adds rule to firewall"
+
+    data = rule_regex.match(rule)
+
+    if data:
+        if os.path.isfile(PROCFS_PATH) and os.access(PROCFS_PATH,os.W_OK):
+            with open(PROCFS_PATH, 'w') as procfile:
+                procfile.write(data.group(1) + '\t')
+                
+                if data.group(2) == 'allow':
+                    procfile.write('a')
+                else:
+                    procfile.write('d')
+                if data.group(4) == 'any':
+                    procfile.write('\tany')
+                else:
+                    procfile.write('\t' + data.group(4))
+                if data.group(6) is None:
+                    procfile.write('\t*')
+                else:
+                    procfile.write('\t' + data.group(6))
+                if data.group(5) == 'any':
+                    procfile.write('\tany')
+                else:
+                    procfile.write('\t' + data.group(5))
+                if data.group(7) is None:
+                    procfile.write('\t*')
+                else:
+                    procfile.write('\t' + data.group(7))
+                if data.group(3) == 'tcp':
+                    procfile.write('\tt')
+                elif data.group(3) == 'udp':
+                    procfile.write('\tu')
+                elif data.group(3) == 'icmp':
+                    procfile.write('\tm')
+                elif data.group(3) == 'ip':
+                    procfile.write('\ti')                    
+        else:
+            print 'PDSFW procfs file does not exist or is not writable!'
+            sys.exit(1)
+
+    else:
+            print 'Error: Invalid firewall rule format!'
+            print 'Should be: id action protocol srcip dstip [src port] [dst port]'
+            sys.exit(2)
+    return
+
+def DeleteRule(id):
+    "Deletes rule with specified ID from firewall"
+    if os.path.isfile(PROCFS_PATH) and os.access(PROCFS_PATH,os.W_OK):
+        with open(PROCFS_PATH, 'w') as myfile:
+            try:
+                val = int(id)
+                myfile.write('d' + str(id) + '\n')
+            except ValueError:
+                print("Invalid parameter! Has to be ID!")
+                sys.exit(2)
+    else:
+        print 'PDSFW procfs file does not exist or is not writable!'
+        sys.exit(1)
+    return
+
+def LoadRules(f):
+    "Loads firewall rules from file and sends them to kernel"
+
+    if os.path.isfile(f) and os.access(f, os.R_OK):
+        for line in open(f):
+            if rule_regex.match(line):
+                matched_rules.append(line.strip())
+            else:
+                invalid_rules.append(line.strip())
+
+        for rule in matched_rules:
+            AddRule(rule)
+
+    else:
+        print 'File: ' + f + ' does not exist or is not readable'
+        sys.exit(1)
+        return
+
+    if invalid_rules:
+        print 'Input file contains invalid firewall rules:'
+        print invalid_rules
+
+    return
+
+def CheckOptions():
+    "Processes command line arguments"
+
+    parser = argparse.ArgumentParser()
+    group1 = parser.add_mutually_exclusive_group()
+    group1.add_argument('-p', help='prints firewall rules in kernel module', action='store_true')
+    group1.add_argument('-f', '--file', help='loads firewall rules from file')
+
+    group2 = parser.add_mutually_exclusive_group()
+    group2.add_argument('-a', help='adds firewall rule to kernel module')
+    group2.add_argument('-d', help='deletes firewall rule from kernel module', type=int)
+
+    args = parser.parse_args()
+
+    if args.file:
+        LoadRules(args.file)
+
+    elif args.p:
+        PrintRules()
+
+    if args.a:
+        AddRule(args.a)
+
+    if args.d:
+        DeleteRule(args.d)
+    return
+
+if __name__ == '__main__':
+    CheckOptions()
